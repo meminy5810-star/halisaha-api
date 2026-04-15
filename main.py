@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import sqlite3
 
-app = FastAPI(title="Güneyin Dantelleri - API (Final)")
+app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
@@ -13,58 +13,42 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-class Oyuncu(BaseModel):
-    isim: str
-    numara: int
-    pozisyon: str
-
 class Performans(BaseModel):
     oyuncu_id: int
     reyting: float
     gol: int
     asist: int
 
-def veritabanini_hazirla():
-    conn = sqlite3.connect("halisaha.db")
-    cursor = conn.cursor()
-    # Oyuncular Tablosu
-    cursor.execute('''CREATE TABLE IF NOT EXISTS oyuncular (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, isim TEXT, numara INTEGER, pozisyon TEXT)''')
-    # Performanslar (Maç Sonu) Tablosu
-    cursor.execute('''CREATE TABLE IF NOT EXISTS performanslar (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, oyuncu_id INTEGER, reyting REAL, gol INTEGER, asist INTEGER)''')
-    conn.commit()
-    conn.close()
-
-veritabanini_hazirla()
-
-@app.get("/oyuncular")
-def oyunculari_getir():
-    conn = sqlite3.connect("halisaha.db")
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM oyuncular")
-    satirlar = cursor.fetchall()
-    conn.close()
-    
-    oyuncular_listesi = [{"id": s[0], "isim": s[1], "numara": s[2], "pozisyon": s[3]} for s in satirlar]
-    return oyuncular_listesi
-
-@app.post("/oyuncular")
-def oyuncu_ekle(yeni_oyuncu: Oyuncu):
-    conn = sqlite3.connect("halisaha.db")
-    cursor = conn.cursor()
-    cursor.execute("INSERT INTO oyuncular (isim, numara, pozisyon) VALUES (?, ?, ?)", 
-                   (yeni_oyuncu.isim, yeni_oyuncu.numara, yeni_oyuncu.pozisyon))
-    conn.commit()
-    conn.close()
-    return {"mesaj": "Oyuncu eklendi!"}
+# Veritabanı tablosu zaten var, aynen devam ediyoruz.
 
 @app.post("/performanslar")
 def performans_ekle(p: Performans):
     conn = sqlite3.connect("halisaha.db")
     cursor = conn.cursor()
+    # Herkesin oyu yeni bir satır olarak kaydedilir
     cursor.execute("INSERT INTO performanslar (oyuncu_id, reyting, gol, asist) VALUES (?, ?, ?, ?)", 
                    (p.oyuncu_id, p.reyting, p.gol, p.asist))
     conn.commit()
     conn.close()
-    return {"mesaj": "Performans kaydedildi!"}
+    return {"mesaj": "Oyunuz başarıyla kaydedildi!"}
+
+# YENİ: Herkesin oylarının ortalamasını getiren endpoint
+@app.get("/istatistikler/{oyuncu_id}")
+def istatistik_getir(oyuncu_id: int):
+    conn = sqlite3.connect("halisaha.db")
+    cursor = conn.cursor()
+    # SQL ile ortalama reytingi ve toplam gol/asisti hesaplıyoruz
+    cursor.execute("""
+        SELECT AVG(reyting), SUM(gol), SUM(asist), COUNT(id) 
+        FROM performanslar 
+        WHERE oyuncu_id = ?
+    """, (oyuncu_id,))
+    res = cursor.fetchone()
+    conn.close()
+    
+    return {
+        "ortalama_reyting": round(res[0], 1) if res[0] else 0,
+        "toplam_gol": res[1] if res[1] else 0,
+        "toplam_asist": res[2] if res[2] else 0,
+        "toplam_oy": res[3]
+    }
